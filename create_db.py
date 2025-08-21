@@ -1,6 +1,5 @@
 # %%
 import pandas as pd
-import sqlalchemy as sa
 import sqlite3
 import os
 db_path = "./qso.db"

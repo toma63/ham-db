@@ -1,9 +1,63 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import adif_io
 import pandas as pd
 import sqlite3
+import questionary
+
+# create a new empty database
+def create_new_db(db_path):
+    "Create a new empty database at the db_path location."
+    if os.path.exists(db_path):
+        answer = input("The database exists.  Do you want to recreate it (y/n)?")
+    if answer.lower() != 'y':
+        exit(0)
+    os.remove(db_path)
+
+    with sqlite3.connect("./qso.db",isolation_level='IMMEDIATE') as conn:    
+        conn = sqlite3.connect("./qso.db",isolation_level='IMMEDIATE')
+        conn.execute("PRAGMA foreign_keys = 1")
+        cursor = conn.cursor()
+        # Create tables
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS callsign (
+            callsign_id INTEGER PRIMARY KEY,          
+            callsign TEXT NOT NULL UNIQUE,
+            name TEXT,
+            location TEXT,
+            rig TEXT,
+            grid TEXT,
+            comment TEXT,
+            last_contact TEXT
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS qso (
+            qso_id INTEGER PRIMARY KEY,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            band TEXT,
+            frequency REAL,
+            callsign_id INTEGER,
+            mode TEXT,
+            comment TEXT,
+            qso TEXT,
+            rst_sent TEXT,
+            rst_rcvd TEXT,
+            FOREIGN KEY(callsign_id) REFERENCES callsign(callsign_id),
+            UNIQUE(callsign_id, date, time)
+        )
+        """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS net (
+            net_id INTEGER PRIMARY KEY,
+            net_name TEXT,
+            frequency REAL,
+            comment TEXT
+        )
+        """)
 
 # convert an adi file to a DataFrame
 def adi_to_df(adi_file):
@@ -129,6 +183,7 @@ def add_callsign(cursor, df_row_dict):
         placeholders = ', '.join(['?'] * len(df_row_dict))
         sql = f"INSERT INTO callsign ({columns}) VALUES ({placeholders})"
         cursor.execute(sql, tuple(df_row_dict.values()))
+        return cursor.lastrowid
     except sqlite3.IntegrityError:
         print(f"{df_row_dict['callsign']} is already in the database.")
 
@@ -150,37 +205,85 @@ def qso_df_by_callsign(callsign, db_path):
         df = pd.read_sql_query(sql, conn)
         return df
     
-def prompt_for_qsos(db_path):
+def get_or_create_callsign(callsign, cursor):
+    """
+    Given a callsign string and a database cursor, return the callsign_id.
+    Prompt for and create the callsign entry if it doesn't exist. 
+    """
+    # check for the callsign
+    # get the callsign_id
+    cursor.execute(f"SELECT * FROM callsign WHERE callsign = ?", (callsign,))
+    results = cursor.fetchall()
+    if len(results) > 0:
+        return results[0][0] # callsign_id
+    else:
+        return prompt_for_callsign(callsign, cursor)
+
+def prompt_for_qsos(cursor):
     "Prompt for and add new qso's.  Prompt for callsign details if a new callsign"
 
-def prompt_for_callsign(db_path):
+def prompt_for_callsign(cursor, callsign=None):
     "Prompt for and add a new callsign. Returns the callsign_id."
+    
+    # if callsign isn't supplied, prompt for it
+    if callsign == None:
+        callsign = questionary.text("callsign:").ask()
+    
+    answers = questionary.form(
+        name = questionary.text("name:"),
+        location = questionary.text("location:"),
+        rig = questionary.text("rig:"),
+        grid = questionary.text("grid:"),
+        comment = questionary.text("comment:")
+    ).ask()
+    answers['callsign'] = callsign
+
+    # insert the database entry, returns the callsign_id
+    return add_callsign(cursor, answers)
 
 # handle command line arguments
 def main():
     parser = argparse.ArgumentParser(
         description="A ham radio logger."
     )
-    # Required positional argument: a number
-    #parser.add_argument("number", type=int, help="An integer number to be used in calculation")
     
-    # database location, defaults to ./qso.db
+    # optional database location, defaults to ./qso.db
     parser.add_argument("-d", "--db_file", default='./qso.db', help="database file location, defaults to ./qso.db")
 
-    # Optional flag: uppercase
-    parser.add_argument("-u", "--uppercase", action="store_true", help="Print the result in uppercase")
+    # prompt for qsos
+    parser.add_argument("-q", "--qso_mode", action="store_true", help="Interactive prompt for new qso's")
+
+    # add a callsign
+    parser.add_argument("-ac", "--add_callsign", help="Interactive prompt for one new specified callsign")
+
+    # create a new database
+    parser.add_argument("-cd", "--create_db", action="store_true", help="create a new database at the specified location, defaults to ./qso.db")
+
+    # load a database from an adi file
+    parser.add_argument("-ld", "--load_db_from_adi", help="loads a database from the specified adi file location")
 
     args = parser.parse_args()
 
-    # Perform a simple calculation
-    result = calculate(args.number, args.multiplier)
-    result_str = f"The result is {result}"
+    db_path = args.db_file
+    if args.create_db:
+        create_new_db(db_path)
+    
+    if args.load_db_from_adi:
+        load_from_adi(args.load_db_from_adi, db_path)
 
-    # Print result
-    if args.uppercase:
-        print(result_str.upper())
-    else:
-        print(result_str)
+    if args.qso_mode:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA foreign_keys = 1")
+            cursor = conn.cursor()
+            prompt_for_qsos(cursor)
+            conn.commit()
+    elif args.add_callsign:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA foreign_keys = 1")
+            cursor = conn.cursor()
+            prompt_for_callsign(cursor)
+            conn.commit()
+
 
     exit(0)
 

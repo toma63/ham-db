@@ -60,6 +60,7 @@ def create_new_db(db_path):
         )
         """)
 
+
 # convert an adi file to a DataFrame
 def adi_to_df(adi_file):
     "Read an adi file, convert to a DataFrame and return it."
@@ -75,10 +76,12 @@ def adi_to_df(adi_file):
 
     return df
 
+
 # custom exception class
 class CallSignMissing(Exception):
     """Custom exception for a missing callsign."""
     pass
+
 
 # Load QSO's from adi
 # skip entries which already exist
@@ -152,6 +155,7 @@ def load_from_adi(adi_file, db_path):
 
     return(callsign_df, qso_df)
 
+
 def add_qso(cursor, df_row_dict):
     "Add a single qso to the database based on a row dict"
     try:
@@ -184,6 +188,7 @@ def add_callsign(cursor, df_row_dict):
     except sqlite3.IntegrityError:
         print(f"{df_row_dict['callsign']} is already in the database.")
 
+
 def qso_df_by_callsign(callsign, db_path):
     "Given a callsign string, return a DataFrame with all of the associated qso's."
     with sqlite3.connect(db_path) as conn:
@@ -201,7 +206,8 @@ def qso_df_by_callsign(callsign, db_path):
         sql = f"SELECT * FROM qso WHERE callsign_id = {callsign_id}"
         df = pd.read_sql_query(sql, conn)
         return df
-    
+
+
 def get_or_create_callsign(cursor, callsign):
     """
     Given a callsign string and a database cursor, return the callsign_id.
@@ -215,6 +221,7 @@ def get_or_create_callsign(cursor, callsign):
         return results[0][0] # callsign_id
     else:
         return prompt_for_callsign(cursor, callsign)
+
 
 def prompt_for_qsos(cursor):
     "Prompt for and add new qso's.  Prompt for callsign details if a new callsign"
@@ -250,6 +257,7 @@ def prompt_for_qsos(cursor):
 
         add_qso(cursor, answers)
 
+
 def prompt_for_callsign(cursor, callsign=None):
     "Prompt for and add a new callsign. Returns the callsign_id."
     
@@ -271,6 +279,40 @@ def prompt_for_callsign(cursor, callsign=None):
     # insert the database entry, returns the callsign_id
     return add_callsign(cursor, answers)
 
+
+def get_column_type(cursor, table, column):
+    "get a column type given a table and column"
+    try:
+        sql = f"PRAGMA table_info({table})"
+        cursor.execute(sql)
+        column_info = {col[1]: col[2] for col in cursor.fetchall()}
+        return column_info.get(column)
+    except sqlite3.OperationalError:
+        print(f'Bad table or column: {sql}')
+
+
+def prompt_for_update(cursor):
+    "Prompt for and add an update to one column"
+
+    answers = questionary.form(
+        table = questionary.text("table:"),
+        column = questionary.text("column:"),
+        where = questionary.text("WHERE (column=value):"),
+        new_value = questionary.text("new value:")
+    ).ask()
+
+    # Update the database entry
+    try:
+        val = answers['new_value']
+        if get_column_type(cursor, answers['table'], answers['column']) != 'REAL':
+            val = f'"{val}"'
+        sql = f'UPDATE {answers["table"]} SET {answers["column"]}={val} WHERE {answers["where"]}'
+        cursor.execute(sql)
+        return cursor.lastrowid
+    except sqlite3.OperationalError:
+        print(f"Invalid operation: {sql}")
+
+
 def run_db_connection(db_path, db_update_function):
     """
     Open a connection to the database at db_path,
@@ -282,6 +324,7 @@ def run_db_connection(db_path, db_update_function):
             cursor = conn.cursor()
             db_update_function(cursor)
             conn.commit()
+
 
 # handle command line arguments
 def main():
@@ -298,7 +341,10 @@ def main():
     # add a callsign
     parser.add_argument("-ac", "--add_callsign", action="store_true", help="Interactive prompt for one new callsign")
 
-    # create a new database
+     # prompt for an update
+    parser.add_argument("-u", "--update", action="store_true", help="Interactive prompt for one column")
+
+   # create a new database
     parser.add_argument("-cd", "--create_db", action="store_true", help="create a new database at the specified location, defaults to ./qso.db")
 
     # load a database from an adi file
@@ -317,8 +363,8 @@ def main():
         run_db_connection(db_path, prompt_for_qsos)
     elif args.add_callsign:
         run_db_connection(db_path, prompt_for_callsign)
-
-
+    elif args.update:
+        run_db_connection(db_path, prompt_for_update)
 
     exit(0)
 

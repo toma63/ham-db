@@ -241,6 +241,18 @@ def prompt_for_callsign(cursor, callsign=None):
     # insert the database entry, returns the callsign_id
     return add_callsign(cursor, answers)
 
+def run_db_connection(db_path, db_update_function):
+    """
+    Open a connection to the database at db_path,
+    then call db_update_function, passing a cursor as the single argument.
+    The connection is committed after the function returns.
+    """
+    with sqlite3.connect(db_path) as conn:
+            conn.execute("PRAGMA foreign_keys = 1")
+            cursor = conn.cursor()
+            db_update_function(cursor)
+            conn.commit()
+
 # handle command line arguments
 def main():
     parser = argparse.ArgumentParser(
@@ -254,7 +266,7 @@ def main():
     parser.add_argument("-q", "--qso_mode", action="store_true", help="Interactive prompt for new qso's")
 
     # add a callsign
-    parser.add_argument("-ac", "--add_callsign", help="Interactive prompt for one new specified callsign")
+    parser.add_argument("-ac", "--add_callsign", action="store_true", help="Interactive prompt for one new callsign")
 
     # create a new database
     parser.add_argument("-cd", "--create_db", action="store_true", help="create a new database at the specified location, defaults to ./qso.db")
@@ -272,17 +284,10 @@ def main():
         load_from_adi(args.load_db_from_adi, db_path)
 
     if args.qso_mode:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("PRAGMA foreign_keys = 1")
-            cursor = conn.cursor()
-            prompt_for_qsos(cursor)
-            conn.commit()
+        run_db_connection(db_path, prompt_for_qsos)
     elif args.add_callsign:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("PRAGMA foreign_keys = 1")
-            cursor = conn.cursor()
-            prompt_for_callsign(cursor)
-            conn.commit()
+        run_db_connection(db_path, prompt_for_callsign)
+
 
 
     exit(0)

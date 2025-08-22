@@ -6,6 +6,7 @@ import adif_io
 import pandas as pd
 import sqlite3
 import questionary
+from datetime import datetime, timezone
 
 # create a new empty database
 def create_new_db(db_path):
@@ -156,15 +157,11 @@ def add_qso(cursor, df_row_dict):
     try:
         # get the callsign_id
         callsign = df_row_dict['callsign']
-        cursor.execute(f"SELECT * FROM callsign WHERE callsign = ?", (callsign,))
-        results = cursor.fetchall()
-        if len(results) > 0:
-            callsign_id = results[0][0]
-        else:
-            raise CallSignMissing(f"Callsign {callsign} not found.")
+        callsign_id = get_or_create_callsign(cursor, callsign)
         # replace the callsign with the callsign_id
         del df_row_dict['callsign']
         df_row_dict['callsign_id'] = callsign_id
+
         columns = ', '.join(df_row_dict.keys())
         placeholders = ', '.join(['?'] * len(df_row_dict))
         sql = f"INSERT INTO qso ({columns}) VALUES ({placeholders})"
@@ -205,7 +202,7 @@ def qso_df_by_callsign(callsign, db_path):
         df = pd.read_sql_query(sql, conn)
         return df
     
-def get_or_create_callsign(callsign, cursor):
+def get_or_create_callsign(cursor, callsign):
     """
     Given a callsign string and a database cursor, return the callsign_id.
     Prompt for and create the callsign entry if it doesn't exist. 
@@ -217,10 +214,41 @@ def get_or_create_callsign(callsign, cursor):
     if len(results) > 0:
         return results[0][0] # callsign_id
     else:
-        return prompt_for_callsign(callsign, cursor)
+        return prompt_for_callsign(cursor, callsign)
 
 def prompt_for_qsos(cursor):
     "Prompt for and add new qso's.  Prompt for callsign details if a new callsign"
+    
+    def is_float(val):
+        try:
+            float(val)
+            return True
+        except ValueError:
+            return "Please enter a valid float."
+    
+    get_more = True
+
+    while get_more:
+        current_date = datetime.now(timezone.utc).strftime("%Y%m%d")
+        current_time = datetime.now(timezone.utc).strftime("%H%M")
+
+        answers = questionary.form(
+            callsign = questionary.text("callsign:"),
+            frequency = questionary.text("frequency:", validate=is_float),
+            date = questionary.text("date:", default=current_date),
+            time = questionary.text("time:", default=current_time),
+            band = questionary.select("band:", choices=["20m", "40m", "17m", "15m", "12m", "10m", "80m", "2m", "70cm", "6m", "160m"]),
+            mode = questionary.select("mode:", choices=["SSB", "FT8", "FT4", "FM"]),
+            rst_sent = questionary.text("rst sent:", default='5/9'),
+            rst_rcvd = questionary.text("rst rcvd:", default='5/9'),
+            qso = questionary.confirm("qso?"),
+            comment = questionary.text("comment:", default=''),
+        ).ask()
+
+        get_more = questionary.confirm("another qso?").ask()
+        answers['frequency'] = float(answers['frequency'])
+
+        add_qso(cursor, answers)
 
 def prompt_for_callsign(cursor, callsign=None):
     "Prompt for and add a new callsign. Returns the callsign_id."
@@ -228,6 +256,8 @@ def prompt_for_callsign(cursor, callsign=None):
     # if callsign isn't supplied, prompt for it
     if callsign == None:
         callsign = questionary.text("callsign:").ask()
+    else:
+        print(f'Creating new callsign entry for {callsign}')
     
     answers = questionary.form(
         name = questionary.text("name:"),

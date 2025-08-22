@@ -301,9 +301,15 @@ def prompt_for_update(cursor):
         new_value = questionary.text("new value:")
     ).ask()
 
+    # confirm
+    val = answers['new_value']
+    confirmation_prompt = f' {answers["table"]}, setting {answers["column"]}={val} WHERE {answers["where"]}'
+    if not questionary.confirm(f'are you sure you want to update table:{confirmation_prompt}:').ask():
+        print('canceling update')
+        return
+    
     # Update the database entry
     try:
-        val = answers['new_value']
         if get_column_type(cursor, answers['table'], answers['column']) != 'REAL':
             val = f'"{val}"'
         sql = f'UPDATE {answers["table"]} SET {answers["column"]}={val} WHERE {answers["where"]}'

@@ -8,6 +8,10 @@ import sqlite3
 import questionary
 from datetime import datetime, timezone
 
+# Important TODOs:
+#  - single source for schema details
+#  - injection attack safety
+
 # create a new empty database
 def create_new_db(db_path):
     "Create a new empty database at the db_path location."
@@ -189,24 +193,55 @@ def add_callsign(cursor, df_row_dict):
         print(f"{df_row_dict['callsign']} is already in the database.")
 
 
+def get_callsign_id(cursor, callsign):
+    "return a callsign_id or raise a CallSignMissing exception"
+    cursor.execute(f'SELECT * FROM callsign WHERE callsign="{callsign}"')
+    results = cursor.fetchall()
+    if len(results) > 0:
+        callsign_id = results[0][0]
+        return callsign_id
+    else:
+        raise CallSignMissing(f"Callsign {callsign} not found")
+    
+
 def qso_df_by_callsign(callsign, db_path):
     "Given a callsign string, return a DataFrame with all of the associated qso's."
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
         # get the callsign_id
-        cursor.execute(f"SELECT * FROM callsign WHERE callsign = ?", (callsign,))
-        results = cursor.fetchall()
-        if len(results) > 0:
-            callsign_id = results[0][0]
-        else:
-            raise CallSignMissing(f"Callsign {callsign} not found.")
-        
-        # Now get all the qso's by that callsign and return a DataFrame
-        sql = f"SELECT * FROM qso WHERE callsign_id = {callsign_id}"
-        df = pd.read_sql_query(sql, conn)
-        return df
+        try:
+            callsign_id = get_callsign_id(cursor, callsign)
+            
+            # Now get all the qso's by that callsign and return a DataFrame
+            sql = f"SELECT * FROM qso WHERE callsign_id = {callsign_id}" # fix injection hazard
+            df = pd.read_sql_query(sql, conn)
+            return df
+        except CallSignMissing as e:
+            print(str(e))
+            raise SystemExit("Please enter a valid callsign")
 
+
+def get_callsign_df(callsign, db_path):
+    "Return a DataFrame given a callsign"
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        # get the callsign_id
+        try:
+            callsign_id = get_callsign_id(cursor, callsign)
+            
+            sql = f'SELECT * FROM callsign WHERE callsign_id={callsign_id}'
+            df = pd.read_sql_query(sql, conn)
+            return df
+        except CallSignMissing as e:
+            print(str(e))
+            raise SystemExit("Please enter a valid callsign")
+
+def print_callsign_and_qsos(callsign, db_path):
+    "print callsign info and associated qsos given a callsign"
+    print(get_callsign_df(callsign, db_path))
+    print(qso_df_by_callsign(callsign, db_path))
 
 def get_or_create_callsign(cursor, callsign):
     """
@@ -303,7 +338,7 @@ def prompt_for_update(cursor):
 
     # confirm
     val = answers['new_value']
-    confirmation_prompt = f' {answers["table"]}, setting {answers["column"]}={val} WHERE {answers["where"]}'
+    confirmation_prompt = f' {answers["table"]}, setting {answers["column"]}={val} WHERE {answers["where"]}' # fix injection hazard
     if not questionary.confirm(f'are you sure you want to update table:{confirmation_prompt}:').ask():
         print('canceling update')
         return
@@ -350,6 +385,9 @@ def main():
      # prompt for an update
     parser.add_argument("-u", "--update", action="store_true", help="Interactive prompt for one column")
 
+     # print callsign and qso information for one callsign
+    parser.add_argument("-cq", "--callsign_qsos", help="Print callsign and qso information for one callsign")
+
    # create a new database
     parser.add_argument("-cd", "--create_db", action="store_true", help="create a new database at the specified location, defaults to ./qso.db")
 
@@ -371,8 +409,21 @@ def main():
         run_db_connection(db_path, prompt_for_callsign)
     elif args.update:
         run_db_connection(db_path, prompt_for_update)
+    elif args.callsign_qsos:
+        print_callsign_and_qsos(args.callsign_qsos, db_path)
 
     exit(0)
 
 if __name__ == "__main__":
     main()
+
+# %%
+import sqlite3
+with sqlite3.connect("./qso.db") as conn:
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM sqlite_master WHERE type="table"')
+    result = cursor.fetchall()
+    print(result)
+
+
+# %%

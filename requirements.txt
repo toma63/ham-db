@@ -1,12 +1,5 @@
 pyreadline3
 pandas
-matplotlib
-plotly
-seaborn
-dash
-gunicorn 
-streamlit
-sqlalchemy
 adif_io
 questionary
 

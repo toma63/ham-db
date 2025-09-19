@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import argparse
 import os
 import adif_io
@@ -7,10 +6,60 @@ import pandas as pd
 import sqlite3
 import questionary
 from datetime import datetime, timezone
+import requests
+import xml.etree.ElementTree as ET
 
 # Important TODOs:
 #  - single source for schema details
 #  - injection attack safety
+
+# Query QRZ.com XML API for a callsign and return info as a dict
+
+# QRZ.com login: returns session key
+def qrz_login(username="YOUR_USERNAME", password="YOUR_PASSWORD"):
+    """
+    Log in to QRZ.com XML API and return session key.
+    """
+    QRZ_BASE_URL = "https://xmldata.qrz.com/xml/current/"
+    login_url = f"{QRZ_BASE_URL}?username={username};password={password}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    login_resp = requests.get(login_url, headers=headers)
+    if login_resp.status_code != 200:
+        raise Exception(f"QRZ.com login failed: {login_resp.text}")
+    login_xml = ET.fromstring(login_resp.text)
+    ns = {'qrz': 'http://xmldata.qrz.com'}
+    session_elem = login_xml.find('qrz:Session', ns)
+    key_elem = session_elem.find('qrz:Key', ns) if session_elem is not None else None
+    session_key = key_elem.text if key_elem is not None else None
+    if not session_key:
+        raise Exception(f"Could not obtain QRZ.com session key: {login_resp.text}")
+    return session_key
+
+# QRZ.com callsign query: uses session key
+def qrz_query_callsign(callsign, session_key):
+    """
+    Query QRZ.com XML API for a callsign using session key, return info as dict.
+    """
+    QRZ_BASE_URL = "https://xmldata.qrz.com/xml/current/"
+    query_url = f"{QRZ_BASE_URL}?s={session_key};callsign={callsign}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    query_resp = requests.get(query_url, headers=headers)
+    if query_resp.status_code != 200:
+        raise Exception(f"QRZ.com callsign query failed: {query_resp.text}")
+    query_xml = ET.fromstring(query_resp.text)
+    ns = {'qrz': 'http://xmldata.qrz.com'}
+    callsign_data = {}
+    cs_elem = query_xml.find('qrz:Callsign', ns)
+    if cs_elem is not None:
+        for child in cs_elem:
+            # Strip namespace from tag
+            tag = child.tag
+            if '}' in tag:
+                tag = tag.split('}', 1)[1]
+            callsign_data[tag] = child.text
+    else:
+        raise Exception(f"No callsign data found in QRZ.com response: {query_resp.text}")
+    return callsign_data
 
 # create a new empty database
 def create_new_db(db_path):

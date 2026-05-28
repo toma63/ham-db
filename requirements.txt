@@ -2,4 +2,6 @@ pyreadline3
 pandas
 adif_io
 questionary
+requests
+
 
